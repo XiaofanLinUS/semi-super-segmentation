@@ -1,32 +1,34 @@
-from mri_dataloader import ColonSegDataset
+from mri_dataloader import ColonSegDataset, NumpyToTensor, NumpyRot, NumpyFlip, get_PIL_image
+from util.data_loading import save_object, load_object
 
 import torch
 import torch.nn as nn
-import torch.utils.data.DataLoader as Dataloader
+from torch.utils.data import Dataset, DataLoader
 from torch import optim
-
+from torchvision.transforms import Compose
 from config import *
 from unet import UNet
 
 
 
 
-net = UNet(1,1)
+net = UNet(1,1).to(device)
+tsfms = Compose([NumpyRot(20, 0.2), NumpyFlip(0.2), NumpyFlip(0.2, False), NumpyToTensor()])
 
-train_pairs = ColonSegDataset('./mri_data/labeled',921, None, True)
-valid_pairs = ColonSegDataset('./mri_data/labeled',921, None, False)
+train_pairs = ColonSegDataset('./mri_data/labeled',921, tsfms, False)
+valid_pairs = ColonSegDataset('./mri_data/labeled',921, NumpyToTensor(), True)
+
 criterion = nn.BCELoss()
 optimizer = optim.Adam(net.parameters())
-train_model(net, criterion, optimizer, epoches, train_pairs, valid_pairs)
 
 def train_model(model, criterion, optmizer, epoches, train_set, valid_set):
     import copy
 
     history = {'train':[], 'valid':[]}
-    data_load = {'train': DataLoader(train_set, *loader_config), 'valid': DataLoader(valid_set, *loader_config)}
-    train_size = len(train_set)
-    valid_size = len(valid_set)
-    data_size = {'train': train_size, 'valid': valid_size}
+    data_load = {'train': DataLoader(train_set,**loader_config), 'valid': DataLoader(valid_set,**loader_config)}
+    # train_size = len(train_set)
+    # valid_size = len(valid_set)
+    # data_size = {'train': train_size, 'valid': valid_size}
     
     best_wts = copy.deepcopy(model.state_dict())
     best_loss = 111111
@@ -43,6 +45,8 @@ def train_model(model, criterion, optmizer, epoches, train_set, valid_set):
                 model.eval()
         
             for inputs, mask in data_load[phase]:
+                inputs = inputs.to(device)
+                mask = mask.to(device)
                 with torch.set_grad_enabled(phase == 'train'):
                     outputs = model(inputs)
 
@@ -57,7 +61,7 @@ def train_model(model, criterion, optmizer, epoches, train_set, valid_set):
                         loss.backward()
                         optmizer.step()
                     accum_loss = accum_loss + loss.item() * inputs.shape[0]
-                    accum_loss = accum_loss / data_size[phase]
+                    # accum_loss = accum_loss / data_size[phase]
                     history[phase].append(accum_loss)
                     print(f"{phase} Loss: {accum_loss:.4f}")
 
@@ -71,3 +75,7 @@ def train_model(model, criterion, optmizer, epoches, train_set, valid_set):
 
     torch.save(best_wts, SAVING_PATH+'/model_weight')
     save_object(history, SAVING_PATH+'/model_history')
+
+
+train_model(net, criterion, optimizer, epoches, train_pairs, valid_pairs)
+

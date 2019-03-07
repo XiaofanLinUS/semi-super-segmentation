@@ -7,10 +7,13 @@ import pydicom
 from util.data_loading import getSubdirs, save_object, load_object
 
 from config import *
+from PIL import Image
 
 def normalize(img):
+    img = img.astype('float')
     img = img - img.min()
-    img = img / img.max()
+    if img.max() != 0:
+        img = img / img.max()
     return img
 
 class NumpyRot(object):
@@ -20,10 +23,10 @@ class NumpyRot(object):
     def __call__(self, imgLabelPair):
         from scipy import ndimage
         img, mask = imgLabelPair
-
+        degree = np.random.randint(self.d)
         if (np.random.rand(1).item() > 1 - self.p):
-            img = ndimage.rotate(img, self.d, reshape=False)
-            mask = ndimage.rotate(mask, self.d, reshape=False)
+            img[0] = ndimage.rotate(img[0], degree, reshape=False)
+            mask[0] = ndimage.rotate(mask[0], degree, reshape=False)
         return img, mask
      
 class NumpyFlip(object):
@@ -37,11 +40,11 @@ class NumpyFlip(object):
 
         if (np.random.rand(1).item() > 1 - self.p):
             if(self.h):
+                img = np.flip(img, axis=2)
+                mask = np.flip(mask, axis=2)
+            else:
                 img = np.flip(img, axis=1)
                 mask = np.flip(mask, axis=1)
-            else:
-                img = np.flip(img, axis=0)
-                mask = np.flip(img, axis=0)
         
         return (img, mask)
 
@@ -49,11 +52,12 @@ class NumpyToTensor(object):
     def __call__(self, imgLabelPair):
         img, mask = imgLabelPair
 
-        return (torch.from_numpy(img).float(), torch.from_numpy(mask).float())
+        return (torch.from_numpy(img.copy()).float(), torch.from_numpy(mask.copy()).float())
 
 
 def get_PIL_image(img):
-    img = normalize(img)
+    print(f'img type: {img.shape}')
+    img = img[0]
     img = np.uint8(img * 255)
     return Image.fromarray(img)
 
@@ -86,14 +90,18 @@ class ColonSegDataset(Dataset):
         return len(self.indices)
 
     def __getitem__(self, idx):
-        img = normalize(pydicom.dcmread(self.data_info[idx][self.indices]).pixel_array)
-        mask = normalize(pydicom.dcmread(self.data_info[idx][self.indices]).pixel_array)
+        img = pydicom.dcmread(self.data_info[self.indices[idx]][0]).pixel_array
+        mask = pydicom.dcmread(self.data_info[self.indices[idx]][1]).pixel_array
+        img = np.expand_dims(img, axis=0)
+        mask = np.expand_dims(mask, axis=0)
+        img = normalize(img)
+        mask = normalize(mask)
 
+        pair = (img, mask)
         if self.transform:
-            img = self.transform(img)
-            mask = self.transform(mask)
+            pair = self.transform(pair)
 
-        return (img, mask)
+        return pair
 
 
 
